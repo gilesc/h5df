@@ -26,7 +26,7 @@ From PyPI:
 
 .. code-block:: bash
 
-    pip install pydf
+    pip install h5df
 
 Latest version:
 
