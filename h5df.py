@@ -1,4 +1,4 @@
-__version__ = "0.0.2-dev"
+__version__ = "0.0.2"
 __all__ = ["Store", "Frame"]
 
 import sys
@@ -149,6 +149,9 @@ class Frame(object):
     # Query API
 
     def shape(self):
+        """
+        Return the dimensions of the Frame.
+        """
         return self.data.shape
 
     def row(self, name):
@@ -160,7 +163,6 @@ class Frame(object):
                 index=decode_index(self.columns))
         s.name = name
         return s
-
 
     def column(self, name):
         """
