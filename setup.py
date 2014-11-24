@@ -15,6 +15,6 @@ setup(
             __version__,
     modules="h5df",
     entry_points={
-        "console_scripts": ["h5df = h5df.main" ]
+        "console_scripts": ["h5df = h5df:main" ]
     }
 )
