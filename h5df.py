@@ -95,17 +95,17 @@ class Frame(object):
     A single numeric matrix dataset.
     """
     def __init__(self, group):
-        self.group = group
-        self.columns = group["columns"]
-        self.data = group["data"]
-        self.index = group["index"]
+        self._group = group
+        self._columns = group["columns"]
+        self._data = group["data"]
+        self._index = group["index"]
         self._reindex()
 
     def _reindex(self):
-        self.index_ix = \
-                index_positions(decode_index(self.index))
-        self.columns_ix = \
-                index_positions(decode_index(self.columns))
+        self._index_ix = \
+                index_positions(decode_index(self._index))
+        self._columns_ix = \
+                index_positions(decode_index(self._columns))
 
     # I/O and adding data
 
@@ -113,13 +113,13 @@ class Frame(object):
         """
         Add a single row to the Frame with the given row name (key).
         """
-        assert len(row) == len(self.columns)
+        assert len(row) == len(self._columns)
         i = self.data.shape[0]
-        nc = len(self.columns)
-        self.data.resize((i+1, nc))
-        self.data[i,:] = row
-        self.index.resize((i+1,))
-        self.index[-1] = encode_index_item(key)
+        nc = len(self._columns)
+        self._data.resize((i+1, nc))
+        self._data[i,:] = row
+        self._index.resize((i+1,))
+        self._index[-1] = encode_index_item(key)
 
     def dump(self, handle=sys.stdout, float_format="%0.3f",
             delimiter="\t"):
@@ -127,11 +127,11 @@ class Frame(object):
         Export the Frame to delimited text on the provided
         file handle.
         """
-        print("", *decode_index(self.columns), 
+        print("", *decode_index(self._columns), 
                 sep=delimiter, file=handle)
         for i in range(self.data.shape[0]):
-            print(decode_index_item(self.index[i]), 
-                    *[float_format % x for x in self.data[i,:]], 
+            print(decode_index_item(self._index[i]), 
+                    *[float_format % x for x in self._data[i,:]], 
                     sep=delimiter, file=handle)
 
     def to_frame(self):
@@ -139,10 +139,10 @@ class Frame(object):
         Realize the entire Frame in memory and return as a pandas
         DataFrame.
         """
-        df = pd.DataFrame(np.array(self.data), 
-                index=decode_index(self.index), 
-                columns=decode_index(self.columns))
-        df.name = self.group.name
+        df = pd.DataFrame(np.array(self._data), 
+                index=decode_index(self._index), 
+                columns=decode_index(self._columns))
+        df.name = self._group.name
         return df
 
     # Query API
@@ -151,15 +151,15 @@ class Frame(object):
         """
         Return the dimensions of the Frame.
         """
-        return self.data.shape
+        return self._data.shape
 
     def row(self, name):
         """
         Return the row with the given name as a pandas Series.
         """
-        i = self.index_ix[name]
-        s = pd.Series(self.data[i,:], 
-                index=decode_index(self.columns))
+        i = self._index_ix[name]
+        s = pd.Series(self._data[i,:], 
+                index=decode_index(self._columns))
         s.name = name
         return s
 
@@ -167,11 +167,31 @@ class Frame(object):
         """
         Return the column with the given name as a pandas Series.
         """
-        j = self.columns_ix[name]
-        s = pd.Series(self.data[:,j], 
-                index=decode_index(self.index))
+        j = self._columns_ix[name]
+        s = pd.Series(self._data[:,j], 
+                index=decode_index(self._index))
         s.name = name
         return s
+
+    def rows(self, names):
+        """
+        Return the subset of rows indexed by the given
+        names as a pandas DataFrame.
+        """
+        ixs = [self._index_ix[n] for n in names]
+        return pd.DataFrame(self._data[ixs,:], 
+                index=decode_index(self._index[ixs]),
+                columns=decode_index(self._columns))
+
+    def columns(self, names):
+        """
+        Return the subset of columns indexed by the given
+        names as a pandas DataFrame.
+        """
+        ixs = [self._columns_ix[n] for n in names]
+        return pd.DataFrame(self._data[:,ixs],
+                index=decode_index(self._index),
+                columns=decode_index(self._columns[ixs]))
 
 ########################
 # Command-line interface
@@ -225,6 +245,24 @@ def column(h5file, path, key):
     column = frame.row(key)
     column.to_frame().to_csv(sys.stdout, sep="\t")
 
+@cli.command()
+@click.argument("h5file")
+@click.argument("path")
+def rows(h5file, path):
+    keys = [line.strip("\n") for line in sys.stdin]
+    store = Store(h5file, mode="r")
+    frame = store[path]
+    frame.rows(keys).to_csv(sys.stdout, sep="\t")
+ 
+@cli.command()
+@click.argument("h5file")
+@click.argument("path")
+def columns(h5file, path):
+    keys = [line.strip("\n") for line in sys.stdin]
+    store = Store(h5file, mode="r")
+    frame = store[path]
+    frame.columns(keys).to_csv(sys.stdout, sep="\t")
+ 
 def main():
     cli()
 
