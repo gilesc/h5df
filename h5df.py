@@ -224,6 +224,8 @@ def column(h5file, path, key):
     column = frame.row(key)
     column.to_frame().to_csv(sys.stdout, sep="\t")
 
+def main():
+    cli()
 
 if __name__ == "__main__":
-    cli()
+    main()
