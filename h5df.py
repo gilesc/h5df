@@ -114,7 +114,7 @@ class Frame(object):
         Add a single row to the Frame with the given row name (key).
         """
         assert len(row) == len(self._columns)
-        i = self.data.shape[0]
+        i = self._data.shape[0]
         nc = len(self._columns)
         self._data.resize((i+1, nc))
         self._data[i,:] = row
