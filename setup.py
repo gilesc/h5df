@@ -1,7 +1,7 @@
 import os
 from setuptools import setup
 
-__version__ = "0.0.4"
+__version__ = "0.0.5"
 
 setup(
     name = "h5df",
@@ -13,7 +13,7 @@ setup(
     url = "https://github.com/gilesc/h5df",
     download_url="https://github.com/gilesc/h5df/tarball/"+ \
             __version__,
-    modules="h5df",
+    py_modules="h5df",
     entry_points={
         "console_scripts": ["h5df = h5df:main" ]
     }
