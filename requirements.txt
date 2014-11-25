@@ -1,4 +1,0 @@
-numpy
-pandas
-h5py
-click
