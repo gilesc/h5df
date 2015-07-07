@@ -147,10 +147,8 @@ Limitations
 Currently there is no way to select rows by numeric index location (i.e., the
 equivalent to ``pandas.DataFrame.iloc``).
 
-Rows are added one at a time and read through Python's standard I/O and string
-manipulation facilities rather than added in batch and using Pandas' optimized
-I/O. Since the HDF5 matrix must be resized with every row added, this is quite
-inefficient for writes.
+Encoding and decoding indices (from unicode to binary) is a little slow,
+meaning that quick queries are slower than they could be.
 
 Iterating through the frames in a HDF5 file, ``Store.__iter__`` is quite
 inefficient if the file contains large numbers of frames.

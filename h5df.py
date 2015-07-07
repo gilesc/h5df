@@ -1,5 +1,6 @@
 __all__ = ["Store", "Frame"]
 
+import itertools
 import sys
 
 import numpy as np
@@ -72,15 +73,23 @@ class Store(object):
         Load delimited text from the provided file handle 
         into the Store at the given path.
         """
-        columns = next(handle).strip("\n").split(delimiter)[1:]
+
+        chunk_size = 100
+
+        chunks = iter(pd.read_csv(handle, sep=delimiter, 
+                chunksize=chunk_size,
+                header=0, engine="c", 
+                quoting=3, index_col=0, 
+                na_values=["nan"]))
+        df = next(chunks)
+        columns = list(map(str, df.columns))
         frame = self.create(path, columns)
 
-        for i,line in enumerate(handle):
-            key, *rest = line.strip("\n").split(delimiter)
-            rest = list(map(as_float, rest))
-            frame.add(key, rest)
-            if verbose and i and (i % 100 == 0):
-                msg = "* {} : row {}".format(path, i)
+        chunks = itertools.chain([df], chunks)
+        for i,chunk in enumerate(chunks):
+            frame.append(chunk)
+            if verbose:
+                msg = "* {} : row {}".format(path, (i+1) * chunk_size)
                 print(msg, file=sys.stderr)
         return frame
 
@@ -90,9 +99,7 @@ class Store(object):
         """
         columns = list(map(str, df.columns))
         frame = self.create(path, columns)
-        for key, row in zip(df.index, df.to_records(index=False)):
-            values = list(map(as_float, row))
-            frame.add(key, values)
+        frame.append(df)
         return frame
 
     def __getitem__(self, group):
@@ -128,6 +135,14 @@ class Frame(object):
         self._columns_ix = \
                 index_positions(decode_index(self._columns))
 
+    @property
+    def nc(self):
+        return len(self._columns)
+
+    @property
+    def nr(self):
+        return self._data.shape[0]
+
     # I/O and adding data
 
     def add(self, key, row):
@@ -135,12 +150,24 @@ class Frame(object):
         Add a single row to the Frame with the given row name (key).
         """
         assert len(row) == len(self._columns)
-        i = self._data.shape[0]
-        nc = len(self._columns)
-        self._data.resize((i+1, nc))
+        nr = self.nr
+        self._data.resize((nr+1, self.nc))
         self._data[i,:] = row
-        self._index.resize((i+1,))
+        self._index.resize((nr+1,))
         self._index[-1] = encode_index_item(key)
+
+    def append(self, df):
+        """
+        Append a DataFrame (with the same columns) to the Frame.
+        """
+        assert df.shape[1] == len(self._columns)
+        nr = self.nr
+        nnr = nr + df.shape[0]
+        self._data.resize((nnr, self.nc))
+        data = df.as_matrix()
+        self._data[nr:,:] = data
+        self._index.resize((nnr,))
+        self._index[nr:] = list(map(encode_index_item, df.index))
 
     def dump(self, handle=sys.stdout, float_format="%0.3f",
             delimiter="\t"):
