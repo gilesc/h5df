@@ -1,3 +1,7 @@
+"""
+Library and CLI for storing and querying numeric labeled matrices in HDF5.
+"""
+
 __all__ = ["Store", "Frame"]
 
 import itertools
@@ -7,6 +11,7 @@ import numpy as np
 import pandas as pd
 import click
 import h5py
+from pydoc import locate
 
 ###################
 # Utility functions
@@ -21,25 +26,38 @@ def as_float(x):
     except ValueError:
         return np.nan
 
-def encode_index_item(x):
-    if isinstance(x, int):
-        x = str(x)
-    if isinstance(x, str):
-        return x.encode("utf-8")
-    else:
-        raise ValueError("Invalid index type")
-
-def decode_index_item(x):
-    return x.decode("utf-8")
-
-def encode_index(xs):
-    return list(map(encode_index_item, xs))
-
-def decode_index(xs):
-    return list(map(decode_index_item, xs))
-
 def is_df_group(g):
     return ("data" in g) and ("index" in g) and ("columns" in g)
+
+def get_encoder_for_type(t, encoding="utf-8"):
+    if t is str:
+        def encoder(xs):
+            if not isinstance(xs, np.ndarray):
+                xs = np.array(xs)
+            xs = xs.astype(np.unicode_)
+            return np.char.encode(xs, encoding).astype("|S100")
+    elif t is int:
+        def encoder(xs):
+            assert isinstance(xs[0], int)
+            if not isinstance(xs, np.ndarray):
+                xs = np.array(xs)
+            return xs
+    else:
+        raise TypeError("Indexes must be str or int")
+    return encoder
+
+def get_encoder(index, encoding="utf-8"):
+    assert len(set(map(type, index))) == 1
+    xt = type(index[0])
+    return get_encoder_for_type(xt)
+
+def get_decoder(index_type_str, encoding="utf-8"):
+    assert isinstance(index_type_str, str)
+    t = locate(index_type_str)
+    if t is str:
+        return lambda xs: np.char.decode(np.array(xs), encoding)
+    elif t is int:
+        return lambda xs: np.array(xs)
 
 #####
 # API
@@ -48,7 +66,8 @@ def is_df_group(g):
 class Store(object):
     """
     A thin wrapper over h5py.File allowing storage
-    and retrieval of numeric matrices from HDF5 files.
+    and retrieval of numeric, labeled matrices from 
+    HDF5 files.
     """
     def __init__(self, path, driver=None, mode="r"):
         self.path = path
@@ -57,21 +76,30 @@ class Store(object):
             driver = "core" if mode == "r" else "sec2"
         self.handle = h5py.File(path, mode=mode, driver=driver)
 
-    def create(self, path, columns):
+    def create(self, path, columns, index_type=str):
+        assert index_type in (str, int)
+
         nc = len(columns)
         group = self.handle.create_group(path)
+        group.attrs["index_type"] = index_type.__name__
+        group.attrs["columns_type"] = type(columns[0]).__name__
+        columns_encoder = get_encoder(columns)
+        index_encoder = get_encoder([index_type()])
+
         _columns = group.create_dataset("columns",
-                data=encode_index(columns), dtype="|S100")
+                data=columns_encoder(columns))
         _data = group.create_dataset("data", 
                 maxshape=(None, nc), shape=(0, nc))
         _index = group.create_dataset("index",
-                maxshape=(None,), shape=(0,), dtype="|S100")
+                maxshape=(None,), 
+                data=index_encoder([]))
         return Frame(group)
 
     def load(self, handle, path, verbose=False, delimiter="\t"):
         """
         Load delimited text from the provided file handle 
-        into the Store at the given path.
+        into the Store at the given path, creating and returning 
+        a new Frame.
         """
 
         chunk_size = 100
@@ -83,7 +111,7 @@ class Store(object):
                 na_values=["nan"]))
         df = next(chunks)
         columns = list(map(str, df.columns))
-        frame = self.create(path, columns)
+        frame = self.create(path, columns, index_type=type(df.index[0]))
 
         chunks = itertools.chain([df], chunks)
         for i,chunk in enumerate(chunks):
@@ -95,10 +123,10 @@ class Store(object):
 
     def put(self, path, df):
         """
-        Add a pandas DataFrame to the Store.
+        Add a pandas DataFrame to the Store, returning a new Frame.
         """
         columns = list(map(str, df.columns))
-        frame = self.create(path, columns)
+        frame = self.create(path, columns, index_type=type(df.index[0]))
         frame.append(df)
         return frame
 
@@ -127,23 +155,49 @@ class Frame(object):
         self._columns = group["columns"]
         self._data = group["data"]
         self._index = group["index"]
+
+        index_t = self._group.attrs["index_type"]
+        columns_t = self._group.attrs["columns_type"]
+        self._index_decoder = get_decoder(index_t)
+        self._index_encoder = get_encoder_for_type(locate(index_t))
+        self._columns_decoder = get_decoder(columns_t)
+
         self._reindex()
 
     def _reindex(self):
-        self._index_ix = \
-                index_positions(decode_index(self._index))
-        self._columns_ix = \
-                index_positions(decode_index(self._columns))
+        self._index_ix = index_positions(self.index)
+        self._columns_ix = index_positions(self.columns)
+
+    ####################
+    # Generic properties
+    ####################
+
+    @property
+    def index(self):
+        return self._index_decoder(self._index)
+
+    @property
+    def columns(self):
+        return self._columns_decoder(self._columns)
 
     @property
     def nc(self):
-        return len(self._columns)
+        return self._data.shape[1]
 
     @property
     def nr(self):
         return self._data.shape[0]
 
-    # I/O and adding data
+    @property
+    def shape(self):
+        """
+        Return the dimensions of the Frame.
+        """
+        return self._data.shape
+
+    #############
+    # Adding data
+    #############
 
     def add(self, key, row):
         """
@@ -154,7 +208,7 @@ class Frame(object):
         self._data.resize((nr+1, self.nc))
         self._data[i,:] = row
         self._index.resize((nr+1,))
-        self._index[-1] = encode_index_item(key)
+        self._index[-1] = self._index_encoder([key])
 
     def append(self, df):
         """
@@ -167,20 +221,27 @@ class Frame(object):
         data = df.as_matrix()
         self._data[nr:,:] = data
         self._index.resize((nnr,))
-        self._index[nr:] = list(map(encode_index_item, df.index))
+        self._index[nr:] = self._index_encoder(df.index)
 
-    def dump(self, handle=sys.stdout, float_format="%0.3f",
+    #############
+    # Bulk output
+    #############
+
+    def dump(self, handle=sys.stdout, precision=3, 
             delimiter="\t"):
         """
         Export the Frame to delimited text on the provided
         file handle.
         """
-        print("", *decode_index(self._columns), 
+        assert isinstance(precision, int) and precision >= 0
+        number_format="%0.{}f".format(precision)
+
+        print("", *self.columns, 
                 sep=delimiter, file=handle)
-        for i in range(self._data.shape[0]):
-            print(decode_index_item(self._index[i]), 
-                    *[float_format % x for x in self._data[i,:]], 
-                    sep=delimiter, file=handle)
+        for i,ix in zip(range(self.shape[0]), self.index):
+            print(ix, *[(number_format % x).rstrip("0").rstrip(".")
+                for x in self._data[i,:].round(precision)], 
+                sep=delimiter, file=handle)
 
     def to_frame(self):
         """
@@ -188,36 +249,30 @@ class Frame(object):
         DataFrame.
         """
         df = pd.DataFrame(np.array(self._data), 
-                index=decode_index(self._index), 
-                columns=decode_index(self._columns))
+                index=self.index,
+                columns=self.columns)
         df.name = self._group.name
         return df
 
-    # Query API
-
-    def shape(self):
-        """
-        Return the dimensions of the Frame.
-        """
-        return self._data.shape
+    ################
+    # Subset queries
+    ################
 
     def row(self, name):
         """
         Return the row with the given name as a pandas Series.
         """
         i = self._index_ix[name]
-        s = pd.Series(self._data[i,:], 
-                index=decode_index(self._columns))
+        s = pd.Series(self._data[i,:], index=self.columns)
         s.name = name
         return s
 
-    def column(self, name):
+    def col(self, name):
         """
         Return the column with the given name as a pandas Series.
         """
         j = self._columns_ix[name]
-        s = pd.Series(self._data[:,j], 
-                index=decode_index(self._index))
+        s = pd.Series(self._data[:,j], index=self.index)
         s.name = name
         return s
 
@@ -228,18 +283,18 @@ class Frame(object):
         """
         ixs = [self._index_ix[n] for n in names]
         return pd.DataFrame(self._data[ixs,:], 
-                index=decode_index(self._index[ixs]),
-                columns=decode_index(self._columns))
+                index=self.index[ixs],
+                columns=self.columns)
 
-    def columns(self, names):
+    def cols(self, names):
         """
         Return the subset of columns indexed by the given
         names as a pandas DataFrame.
         """
         ixs = [self._columns_ix[n] for n in names]
         return pd.DataFrame(self._data[:,ixs],
-                index=decode_index(self._index),
-                columns=decode_index(self._columns[ixs]))
+                index=self.index,
+                columns=self.columns[ixs])
 
 ########################
 # Command-line interface
@@ -273,8 +328,7 @@ def dump(h5file, path, precision, delimiter):
 
     store = Store(h5file, mode="r")
     frame = store[path]
-    fmt = "%0." + str(precision) + "f"
-    frame.dump(float_format=fmt, delimiter=delimiter)
+    frame.dump(precision=precision, delimiter=delimiter)
 
 @cli.command(help="Retrieve data for a single row.")
 @click.argument("h5file")
@@ -290,10 +344,10 @@ def row(h5file, path, key):
 @click.argument("h5file")
 @click.argument("path")
 @click.argument("key")
-def column(h5file, path, key):
+def col(h5file, path, key):
     store = Store(h5file, mode="r")
     frame = store[path]
-    column = frame.column(key)
+    column = frame.col(key)
     column.to_frame().to_csv(sys.stdout, sep="\t")
 
 @cli.command(help="Select subframe containing row names provided on stdin")
@@ -308,13 +362,18 @@ def rows(h5file, path):
 @cli.command(help="Select subframe containing column names provided on stdin")
 @click.argument("h5file")
 @click.argument("path")
-def columns(h5file, path):
+def cols(h5file, path):
     keys = [line.strip("\n") for line in sys.stdin]
     store = Store(h5file, mode="r")
     frame = store[path]
-    frame.columns(keys).to_csv(sys.stdout, sep="\t")
+    frame.cols(keys).to_csv(sys.stdout, sep="\t")
  
 def main():
+    # Don't display BrokenPipeError if output commands are truncated by 
+    # an external program
+    from signal import signal, SIGPIPE, SIG_DFL
+    signal(SIGPIPE, SIG_DFL)
+
     cli()
 
 if __name__ == "__main__":

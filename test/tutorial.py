@@ -22,6 +22,6 @@ with tempfile.NamedTemporaryFile() as tf:
     for key in store: print(key)
 
     df1 = store["/frames/1"]
-    print(df1.column("W"))
+    print(df1.col("W"))
     # To get a normal (in-memory) pandas.DataFrame
     print(df1.to_frame())

@@ -106,17 +106,17 @@ file and individual data frame, respectively. Here is some example usage:
 
     # returns a pandas.DataFrame
     >> df1.rows(["A","C"]) 
-    >> df1.columns(["W","Y"])
+    >> df1.cols(["W","Y"])
 
     # Returns the whole Frame as a pandas.DataFrame
     >> df1.to_frame()
 
 The full list of methods supported by ``h5df.Frame`` is:
 
-- ``Frame.row(key)`` and ``Frame.column(key)`` - return a ``pandas.Series``
+- ``Frame.row(key)`` and ``Frame.col(key)`` - return a ``pandas.Series``
   corresponding to the row/column
 
-- ``Frame.rows(keys)`` and ``Frame.columns(keys)`` - given a list of row/column
+- ``Frame.rows(keys)`` and ``Frame.cols(keys)`` - given a list of row/column
   index names, return an in-memory ``pandas.DataFrame`` corresponding to the
   subset of the overall ``Frame`` containing the desired rows or columns
 
@@ -153,13 +153,14 @@ meaning that quick queries are slower than they could be.
 Iterating through the frames in a HDF5 file, ``Store.__iter__`` is quite
 inefficient if the file contains large numbers of frames.
 
-All indexes are stored as strings, or to be more specific,
-``np.dtype("|S100")`` encoded as ``"utf-8"``.  This has several practical
-consequences: 
+For ``Frame.dump()``, output formatting is not vectorized (slower than
+necessary).
 
-1. numeric indices will be cast to strings and must be queried as strings
-2. index and column names are currently limited to 100 UTF-8 characters
-3. UTF-8 encoding is hardcoded and other encodings are not supported 
+String indices are stored as ``np.dtype("|S100")`` encoded as ``"utf-8"``.
+This has several practical consequences: 
+
+1. index and column names are currently limited to 100 UTF-8 characters
+2. UTF-8 encoding is hardcoded and other encodings are not supported 
    (thus, characters from other encodings that will fail 
    ``str.encode("utf-8")`` will cause an error.
 

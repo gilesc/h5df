@@ -20,10 +20,10 @@ echo -e "\n* Row" 1>&2
 call row $db $hpath X
 
 echo -e "\n* Column" 1>&2
-call column $db $hpath A
+call col $db $hpath A
 
 echo -e "\n* Rows" 1>&2
 echo -e "X\nY" | call rows $db $hpath
 
 echo -e "\n* Columns" 1>&2
-echo -e "A\nC" | call columns $db $hpath
+echo -e "A\nC" | call cols $db $hpath
