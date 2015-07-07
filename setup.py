@@ -14,7 +14,7 @@ setup(
     download_url="https://github.com/gilesc/h5df/tarball/"+ \
             __version__,
     py_modules=["h5df"],
-    install_requires=["numpy", "pandas", "h5py", "click"],
+    install_requires=["numpy", "pandas", "h5py", "click", "pydoc"],
     entry_points={
         "console_scripts": ["h5df = h5df:main" ]
     }
