@@ -56,9 +56,118 @@ Usage
         A   B   C
     ...
 
-(more examples to come)
+To select an individual row or column, use "h5py row|column":
+
+.. code-block:: bash
+
+    $ h5df row foo.h5 X
+    
+
+CLI flags
+=========
+
+Use ``h5df <cmd> --help`` for a full listing of options, but a few useful ones:
+
+- ``h5df load -v`` : will output progress as a matrix is loaded (every 100 rows)
+- ``h5df <any output command> -p N`` will output values with decimal precision N
+
+API
+===
+
+The two main classes are ``h5df.Store`` and ``h5df.Frame``, representing a HDF5
+file and individual data frame, respectively. Here is some example usage:
+
+.. code-block:: python
+
+    >> from h5df import Store
+    >> import pandas as pd
+    >> import numpy as np
+    >> np.random.seed(0)
+
+    # Create a Store object; the default mode is read-only. 
+    # See http://docs.h5py.org/en/latest/high/file.html for available modes
+    >> store = Store("test.h5df", mode="a")
+    >> index = ["A","B","C"]
+    >> columns = ["V","W","X","Y","Z"]
+    >> mkdf = lambda: pd.DataFrame(np.random.random((3,5)), index=index, columns=columns)
+    >> store.put("/frames/1", mkdf())
+    >> store.put("/frames/2", mkdf())
+
+    # Iterate through HDF5 paths corresponding to Frame objects
+    >> for key in store: print(key)
+
+    >> df1 = store["/frames/1"]
+
+    # Various selection options
+
+    # returns pandas.Series
+    >> df1.column("W") 
+    >> df1.row("A")
+
+    # returns a pandas.DataFrame
+    >> df1.rows(["A","C"]) 
+    >> df1.columns(["W","Y"])
+
+    # Returns the whole Frame as a pandas.DataFrame
+    >> df1.to_frame()
+
+The full list of methods supported by ``h5df.Frame`` is:
+
+- ``Frame.row(key)`` and ``Frame.column(key)`` - return a ``pandas.Series``
+  corresponding to the row/column
+
+- ``Frame.rows(keys)`` and ``Frame.columns(keys)`` - given a list of row/column
+  index names, return an in-memory ``pandas.DataFrame`` corresponding to the
+  subset of the overall ``Frame`` containing the desired rows or columns
+
+- ``Frame.shape`` - returns a tuple of (# rows, # columns)
+
+- ``Frame.to_frame()`` - return the entire ``Frame`` as an in-memory
+  ``pandas.DataFrame``. Make sure you have enough memory!
+
+- ``Frame.add(key, data)`` - add a new row to the matrix with the given unique key. Due to the way of
+
+Performance notes
+=================
+
+Data is indexed row-major. Thus row-based queries will be much faster.
+Generally you should pre-transpose your matrix before putting it into the
+``Store`` to ensure that the most frequently queried axis will be on the rows.
+
+The ``h5df.Store()`` constructor takes a keyword argument, "driver". The full
+description of available drivers is at
+http://docs.h5py.org/en/latest/high/file.html . For Linux systems, the default
+stdio-based driver is "sec2", whereas "core" will memory-map the whole HDF5
+file. If your system supports it and the file is frequently used (and therefore
+will be in your OS page cache), "core" may be faster, especially for reads.
+
+Limitations
+===========
+
+Currently there is no way to select rows by numeric index location (i.e., the
+equivalent to ``pandas.DataFrame.iloc``).
+
+Rows are added one at a time and read through Python's standard I/O and string
+manipulation facilities rather than added in batch and using Pandas' optimized
+I/O. Since the HDF5 matrix must be resized with every row added, this is quite
+inefficient for writes.
+
+Iterating through the frames in a HDF5 file, ``Store.__iter__`` is quite
+inefficient if the file contains large numbers of frames.
+
+All indexes are stored as strings, or to be more specific,
+``np.dtype("|S100")`` encoded as ``"utf-8"``.  This has several practical
+consequences: 
+
+1. numeric indices will be cast to strings and must be queried as strings
+2. index and column names are currently limited to 100 UTF-8 characters
+3. UTF-8 encoding is hardcoded and other encodings are not supported 
+   (thus, characters from other encodings that will fail 
+   ``str.encode("utf-8")`` will cause an error.
+
+There are plans to fix these limitations in future versions.
 
 License
 =======
 
-GPLv3
+AGPLv3+

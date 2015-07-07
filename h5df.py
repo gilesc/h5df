@@ -37,6 +37,9 @@ def encode_index(xs):
 def decode_index(xs):
     return list(map(decode_index_item, xs))
 
+def is_df_group(g):
+    return ("data" in g) and ("index" in g) and ("columns" in g)
+
 #####
 # API
 #####
@@ -46,10 +49,12 @@ class Store(object):
     A thin wrapper over h5py.File allowing storage
     and retrieval of numeric matrices from HDF5 files.
     """
-    def __init__(self, path, mode="r"):
+    def __init__(self, path, driver=None, mode="r"):
         self.path = path
         self.mode = mode
-        self.handle = h5py.File(path, mode)
+        if driver is None:
+            driver = "core" if mode == "r" else "sec2"
+        self.handle = h5py.File(path, mode=mode, driver=driver)
 
     def create(self, path, columns):
         nc = len(columns)
@@ -62,7 +67,7 @@ class Store(object):
                 maxshape=(None,), shape=(0,), dtype="|S100")
         return Frame(group)
 
-    def load(self, handle, path, delimiter="\t"):
+    def load(self, handle, path, verbose=False, delimiter="\t"):
         """
         Load delimited text from the provided file handle 
         into the Store at the given path.
@@ -74,13 +79,21 @@ class Store(object):
             key, *rest = line.strip("\n").split(delimiter)
             rest = list(map(as_float, rest))
             frame.add(key, rest)
+            if verbose and i and (i % 100 == 0):
+                msg = "* {} : row {}".format(path, i)
+                print(msg, file=sys.stderr)
         return frame
 
-    def put(self, df, path):
+    def put(self, path, df):
         """
         Add a pandas DataFrame to the Store.
         """
-        raise NotImplementedError
+        columns = list(map(str, df.columns))
+        frame = self.create(path, columns)
+        for key, row in zip(df.index, df.to_records(index=False)):
+            values = list(map(as_float, row))
+            frame.add(key, values)
+        return frame
 
     def __getitem__(self, group):
         """
@@ -89,6 +102,14 @@ class Store(object):
         if not group in self.handle:
             raise KeyError
         return Frame(self.handle[group])
+
+    def __iter__(self):
+        o = []
+        def visitor(key):
+            if is_df_group(self.handle[key]):
+                o.append(key)
+        self.handle.visit(visitor)
+        return iter(o)
 
 class Frame(object):
     """
@@ -129,7 +150,7 @@ class Frame(object):
         """
         print("", *decode_index(self._columns), 
                 sep=delimiter, file=handle)
-        for i in range(self.data.shape[0]):
+        for i in range(self._data.shape[0]):
             print(decode_index_item(self._index[i]), 
                     *[float_format % x for x in self._data[i,:]], 
                     sep=delimiter, file=handle)
@@ -206,9 +227,12 @@ def cli():
 @click.argument("path")
 @click.option("--delimiter", "-d", default="\t",
         help="Column delimiter (default tab).")
-def load(h5file, path, delimiter):
-    store = Store(h5file, mode="w")
-    frame = store.load(sys.stdin, path, delimiter=delimiter)
+@click.option("--verbose", "-v", 
+        help="Output progress on stderr",
+        default=False, is_flag=True)
+def load(h5file, path, delimiter, verbose):
+    store = Store(h5file, mode="a")
+    frame = store.load(sys.stdin, path, verbose=verbose, delimiter=delimiter)
 
 @cli.command(help="Export to delimited text.")
 @click.argument("h5file")
@@ -242,10 +266,10 @@ def row(h5file, path, key):
 def column(h5file, path, key):
     store = Store(h5file, mode="r")
     frame = store[path]
-    column = frame.row(key)
+    column = frame.column(key)
     column.to_frame().to_csv(sys.stdout, sep="\t")
 
-@cli.command()
+@cli.command(help="Select subframe containing row names provided on stdin")
 @click.argument("h5file")
 @click.argument("path")
 def rows(h5file, path):
@@ -254,7 +278,7 @@ def rows(h5file, path):
     frame = store[path]
     frame.rows(keys).to_csv(sys.stdout, sep="\t")
  
-@cli.command()
+@cli.command(help="Select subframe containing column names provided on stdin")
 @click.argument("h5file")
 @click.argument("path")
 def columns(h5file, path):
