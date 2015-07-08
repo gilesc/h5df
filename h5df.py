@@ -27,6 +27,8 @@ def as_float(x):
         return np.nan
 
 def is_df_group(g):
+    if not isinstance(g, h5py.Group):
+        return False
     return ("data" in g) and ("index" in g) and ("columns" in g)
 
 def get_encoder_for_type(t, encoding="utf-8"):
@@ -69,12 +71,10 @@ class Store(object):
     and retrieval of numeric, labeled matrices from 
     HDF5 files.
     """
-    def __init__(self, path, driver=None, mode="r"):
+    def __init__(self, path, mode="r", **kwargs):
         self.path = path
         self.mode = mode
-        if driver is None:
-            driver = "core" if mode == "r" else "sec2"
-        self.handle = h5py.File(path, mode=mode, driver=driver)
+        self.handle = h5py.File(path, mode=mode, **kwargs)
 
     def create(self, path, columns, index_type=str):
         assert index_type in (str, int)
@@ -140,10 +140,11 @@ class Store(object):
 
     def __iter__(self):
         o = []
-        def visitor(key):
-            if is_df_group(self.handle[key]):
+        def visitor(key, obj):
+            if is_df_group(obj):
+                key = key if key.startswith("/") else ("/" + key)
                 o.append(key)
-        self.handle.visit(visitor)
+        self.handle.visititems(visitor)
         return iter(o)
 
 class Frame(object):
@@ -368,6 +369,13 @@ def cols(h5file, path):
     frame = store[path]
     frame.cols(keys).to_csv(sys.stdout, sep="\t")
  
+@cli.command(help="List matrices in a HDF5 file")
+@click.argument("h5file")
+def ls(h5file):
+    store = Store(h5file, mode="r")
+    for path in store:
+        print(path)
+
 def main():
     # Don't display BrokenPipeError if output commands are truncated by 
     # an external program
