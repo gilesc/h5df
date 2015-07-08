@@ -6,6 +6,7 @@ __all__ = ["Store", "Frame"]
 
 import itertools
 import sys
+import enum
 
 import numpy as np
 import pandas as pd
@@ -13,23 +14,24 @@ import click
 import h5py
 from pydoc import locate
 
-###################
-# Utility functions
-###################
+class Attribute(enum.Enum):
+    IS_FRAME = "h5df.is_frame"
+    INDEX_TYPE = "h5df.index_type"
+    COLUMNS_TYPE = "h5df.columns_type"
 
 def index_positions(xs):
     return dict(map(reversed, enumerate(xs)))
 
-def as_float(x):
-    try:
-        return float(x)
-    except ValueError:
-        return np.nan
-
-def is_df_group(g):
+def is_df(g):
+    """
+    Return a bool indicating whether the given ``h5py.Group`` contains
+    a ``h5df.Frame``. Given any other object, including a ``h5py.Dataset``,
+    this function will return False.
+    """
     if not isinstance(g, h5py.Group):
         return False
-    return ("data" in g) and ("index" in g) and ("columns" in g)
+    return (Attribute.IS_FRAME in g.attrs) \
+            and (bool(g.attrs[Attribute.IS_FRAME]) is True)
 
 def get_encoder_for_type(t, encoding="utf-8"):
     if t is str:
@@ -77,12 +79,23 @@ class Store(object):
         self.handle = h5py.File(path, mode=mode, **kwargs)
 
     def create(self, path, columns, index_type=str):
+        """
+        Create a new ``h5py.Frame`` in the HDF5 file with 
+        the given columns. The column names are fixed after 
+        creation and their type will be inferred based on the 
+        provided list or array.
+
+        Optionally, an ``index_type`` can be provided, either str 
+        or int (default str), to indicate the type of row index.
+        """
         assert index_type in (str, int)
 
         nc = len(columns)
         group = self.handle.create_group(path)
-        group.attrs["index_type"] = index_type.__name__
-        group.attrs["columns_type"] = type(columns[0]).__name__
+        group.attrs[Attribute.INDEX_TYPE] = index_type.__name__
+        group.attrs[Attribute.COLUMNS_TYPE] = type(columns[0]).__name__
+        group.attrs[Attribute.IS_FRAME] = True
+
         columns_encoder = get_encoder(columns)
         index_encoder = get_encoder([index_type()])
 
@@ -93,7 +106,27 @@ class Store(object):
         _index = group.create_dataset("index",
                 maxshape=(None,), 
                 data=index_encoder([]))
+
         return Frame(group)
+
+    def delete(self, path):
+        """
+        Permanently delete the data underlying the Frame at this path 
+        (any existing Frame objects based on this data should not be used 
+        after calling this function).
+
+        Note: "del store[path]" is NOT a substitute for this function. 
+        """
+        assert is_df(self.handle[path])
+        del self.handle[path]
+
+    def rename(self, src, dest):
+        """
+        Rename/move the HDF5 group from a HDF5 path containing
+        valid Frame data
+        """
+        assert is_df(self.handle[path])
+        self.handle.move(src, dest)
 
     def load(self, handle, path, verbose=False, delimiter="\t"):
         """
@@ -132,16 +165,20 @@ class Store(object):
 
     def __getitem__(self, group):
         """
-        Retrieve a Frame from this Store.
+        Retrieve a Frame from this Store at the given HDF5 path.
         """
         if not group in self.handle:
             raise KeyError
         return Frame(self.handle[group])
 
     def __iter__(self):
+        """
+        Return an iterator over the HDF5 path strings that contain 
+        valid Frame data.
+        """
         o = []
         def visitor(key, obj):
-            if is_df_group(obj):
+            if is_df(obj):
                 key = key if key.startswith("/") else ("/" + key)
                 o.append(key)
         self.handle.visititems(visitor)
@@ -152,13 +189,15 @@ class Frame(object):
     A single numeric matrix dataset.
     """
     def __init__(self, group):
+        assert is_df(group)
+
         self._group = group
         self._columns = group["columns"]
         self._data = group["data"]
         self._index = group["index"]
 
-        index_t = self._group.attrs["index_type"]
-        columns_t = self._group.attrs["columns_type"]
+        index_t = self._group.attrs[Attribute.INDEX_TYPE]
+        columns_t = self._group.attrs[Attribute.COLUMNS_TYPE]
         self._index_decoder = get_decoder(index_t)
         self._index_encoder = get_encoder_for_type(locate(index_t))
         self._columns_decoder = get_decoder(columns_t)

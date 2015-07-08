@@ -127,6 +127,23 @@ The full list of methods supported by ``h5df.Frame`` is:
 
 - ``Frame.add(key, data)`` - add a new row to the matrix with the given unique key. Due to the way of
 
+Storage format
+==============
+
+Each ``h5df.Frame`` is stored as an HDF5 Group containing 3 Datasets: ``index``
+and ``columns`` (both are 1D arrays of 8-byte integers or UTF-8 encoded binary
+strings), and ``data`` (a 2D double array). 
+
+The Group also contains a few HDF5 attributes:
+- ``h5df.index_type`` and ``h5df.columns_type`` : a string, either "str" or "int", 
+  marking the data type of each of the corresponding indices
+- ``h5df.is_frame`` : a boolean, always set to true, which indicates that
+  this Group contains valid ``Frame`` data
+
+Because of this design, it is possible to store a ``Frame`` "inside" the Group
+containing another ``Frame``, but is not recommended in case of future format
+changes (and because it is confusing).
+
 Performance notes
 =================
 
@@ -165,6 +182,19 @@ This has several practical consequences:
    ``str.encode("utf-8")`` will cause an error.
 
 There are plans to fix these limitations in future versions.
+
+Potential gotchas
+=================
+
+When matrices are renamed or deleted using ``Store.rename()`` or
+``Store.delete()``, existing ``Frame`` objects based on this data will not be
+notified of this change and their behavior is undefined. Most likely an attempt
+to use dangling ``Frame`` objects will result in an error, but may return
+erroneous results for some methods.
+
+It is up to the user to avoid this situation. When renaming a ``Frame``, the
+user should subsequently get a new ``Frame`` object from the destination path
+using ``Store.__getitem__`` if they plan to continue to use the data.
 
 License
 =======
