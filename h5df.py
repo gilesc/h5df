@@ -30,8 +30,8 @@ def is_df(g):
     """
     if not isinstance(g, h5py.Group):
         return False
-    return (Attribute.IS_FRAME in g.attrs) \
-            and (bool(g.attrs[Attribute.IS_FRAME]) is True)
+    return (Attribute.IS_FRAME.value in g.attrs) \
+            and (bool(g.attrs[Attribute.IS_FRAME.value]) is True)
 
 def get_encoder_for_type(t, encoding="utf-8"):
     if t is str:
@@ -92,9 +92,9 @@ class Store(object):
 
         nc = len(columns)
         group = self.handle.create_group(path)
-        group.attrs[Attribute.INDEX_TYPE] = index_type.__name__
-        group.attrs[Attribute.COLUMNS_TYPE] = type(columns[0]).__name__
-        group.attrs[Attribute.IS_FRAME] = True
+        group.attrs[Attribute.INDEX_TYPE.value] = index_type.__name__
+        group.attrs[Attribute.COLUMNS_TYPE.value] = type(columns[0]).__name__
+        group.attrs[Attribute.IS_FRAME.value] = True
 
         columns_encoder = get_encoder(columns)
         index_encoder = get_encoder([index_type()])
@@ -196,8 +196,8 @@ class Frame(object):
         self._data = group["data"]
         self._index = group["index"]
 
-        index_t = self._group.attrs[Attribute.INDEX_TYPE]
-        columns_t = self._group.attrs[Attribute.COLUMNS_TYPE]
+        index_t = self._group.attrs[Attribute.INDEX_TYPE.value]
+        columns_t = self._group.attrs[Attribute.COLUMNS_TYPE.value]
         self._index_decoder = get_decoder(index_t)
         self._index_encoder = get_encoder_for_type(locate(index_t))
         self._columns_decoder = get_decoder(columns_t)
@@ -321,20 +321,20 @@ class Frame(object):
         Return the subset of rows indexed by the given
         names as a pandas DataFrame.
         """
-        ixs = [self._index_ix[n] for n in names]
+        ixs = list(sorted([self._index_ix[n] for n in names]))
         return pd.DataFrame(self._data[ixs,:], 
                 index=self.index[ixs],
-                columns=self.columns)
+                columns=self.columns).loc[names,:]
 
     def cols(self, names):
         """
         Return the subset of columns indexed by the given
         names as a pandas DataFrame.
         """
-        ixs = [self._columns_ix[n] for n in names]
+        ixs = list(sorted([self._columns_ix[n] for n in names]))
         return pd.DataFrame(self._data[:,ixs],
                 index=self.index,
-                columns=self.columns[ixs])
+                columns=self.columns[ixs]).loc[:,names]
 
 ########################
 # Command-line interface
@@ -408,12 +408,27 @@ def cols(h5file, path):
     frame = store[path]
     frame.cols(keys).to_csv(sys.stdout, sep="\t")
  
-@cli.command(help="List matrices in a HDF5 file")
+@cli.command(help="List HDF5 path for Frames in a HDF5 file")
 @click.argument("h5file")
 def ls(h5file):
     store = Store(h5file, mode="r")
     for path in store:
         print(path)
+
+@cli.command(help="Move/rename a Frame to a different HDF5 path")
+@click.argument("h5file")
+@click.argument("src")
+@click.argument("dest")
+def mv(h5file, src, dest):
+    store = Store(h5file, mode="a")
+    store.rename(src, dest)
+
+@cli.command(help="Delete the Frame at a given HDF5 path")
+@click.argument("h5file")
+@click.argument("path")
+def rm(h5file, path):
+    store = Store(h5file, mode="a")
+    store.delete(path)
 
 def main():
     # Don't display BrokenPipeError if output commands are truncated by 

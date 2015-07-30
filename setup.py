@@ -1,7 +1,7 @@
 import os
 from setuptools import setup
 
-__version__ = "0.1.3"
+__version__ = "0.1.3.1"
 
 setup(
     name = "h5df",
