@@ -4,9 +4,10 @@ Library and CLI for storing and querying numeric labeled matrices in HDF5.
 
 __all__ = ["Store", "Frame"]
 
-import itertools
-import sys
 import enum
+import itertools
+import os
+import sys
 
 import numpy as np
 import pandas as pd
@@ -78,9 +79,45 @@ class Store(object):
         self.mode = mode
         self.handle = h5py.File(path, mode=mode, **kwargs)
 
+    def merge(self, path, duplicate="error"):
+        """
+        Merge another :class:`h5df.Store` at the given file path 
+        into this Store (that is, copy all h5df datasets into this 
+        Store).
+
+        Arguments
+        ---------
+        path: str
+            File path to HDF5 file whose h5df Frames will be copied
+            into this Store.
+        duplicate: {"error", "overwrite", "ignore"}
+            If two Frames exist in this Store and the target Store with
+            the same HDF5 path, it will be handled according to this option:
+            - "error" (default) will throw a ValueError
+            - "overwrite" will overwrite the Frame in this store
+            - "ignore" will keep the Frame in this Store as-is
+        """
+        assert duplicate in ("error", "overwrite", "ignore")
+
+        o = Store(path, mode="r")
+
+        # Fail before any copies if any duplicates exist
+        if duplicate == "error":
+            for hpath in o:
+                if hpath in self:
+                    raise ValueError("Duplicate HDF5 paths at: {}".format(hpath))
+
+        for hpath in o:
+            if (duplicate == "ignore") and (hpath in self):
+                continue
+            dpath = os.path.dirname(hpath)
+            if not dpath in self.handle:
+                self.handle.create_group(dpath)
+            o.handle.copy(hpath, self.handle[dpath])
+
     def create(self, path, columns, index_type=str):
         """
-        Create a new ``h5py.Frame`` in the HDF5 file with 
+        Create a new :class:`h5df.Frame` in the HDF5 file with 
         the given columns. The column names are fixed after 
         creation and their type will be inferred based on the 
         provided list or array.
@@ -102,7 +139,7 @@ class Store(object):
         _columns = group.create_dataset("columns",
                 data=columns_encoder(columns))
         _data = group.create_dataset("data", 
-                maxshape=(None, nc), shape=(0, nc))
+                maxshape=(None, nc), chunks=(1,nc), shape=(0, nc))
         _index = group.create_dataset("index",
                 maxshape=(None,), 
                 data=index_encoder([]))
@@ -205,6 +242,7 @@ class Frame(object):
         self._reindex()
 
     def _reindex(self):
+        self._ix_stale = False
         self._index_ix = index_positions(self.index)
         self._columns_ix = index_positions(self.columns)
 
@@ -214,10 +252,14 @@ class Frame(object):
 
     @property
     def index(self):
+        if self._ix_stale:
+            self._reindex()
         return self._index_decoder(self._index)
 
     @property
     def columns(self):
+        if self._ix_stale:
+            self._reindex()
         return self._columns_decoder(self._columns)
 
     @property
@@ -249,12 +291,13 @@ class Frame(object):
         self._data[i,:] = row
         self._index.resize((nr+1,))
         self._index[-1] = self._index_encoder([key])
+        self._ix_stale = True
 
     def append(self, df):
         """
         Append a DataFrame (with the same columns) to the Frame.
         """
-        assert df.shape[1] == len(self._columns)
+        assert df.shape[1] == len(self._columns), "Incorrect number of columns: {} given, {} expected".format(df.shape[1], len(self._columns))
         nr = self.nr
         nnr = nr + df.shape[0]
         self._data.resize((nnr, self.nc))
@@ -262,6 +305,7 @@ class Frame(object):
         self._data[nr:,:] = data
         self._index.resize((nnr,))
         self._index[nr:] = self._index_encoder(df.index)
+        self._ix_stale = True
 
     #############
     # Bulk output
