@@ -79,6 +79,9 @@ class Store(object):
         self.mode = mode
         self.handle = h5py.File(path, mode=mode, **kwargs)
 
+    def close(self):
+        self.handle.close()
+
     def merge(self, path, duplicate="error"):
         """
         Merge another :class:`h5df.Store` at the given file path 
@@ -156,6 +159,9 @@ class Store(object):
         """
         assert is_df(self.handle[path])
         del self.handle[path]
+
+    def __delitem__(self, path):
+        self.delete(path)
 
     def rename(self, src, dest):
         """
